@@ -14,7 +14,7 @@ using Microsoft.IdentityModel.Tokens;
 
 var builder = WebApplication.CreateBuilder(args);
 await builder.Configuration.LoadVaultAsync();
-builder.AddServiceDefaults();
+builder.AddServiceDefaults("davids-baskets");
 builder.Services.AddTrustedForwardedHeaders(builder.Configuration, builder.Environment);
 builder.Services.AddBasketsInfrastructure(builder.Configuration);
 

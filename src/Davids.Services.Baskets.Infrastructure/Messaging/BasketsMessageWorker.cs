@@ -47,21 +47,24 @@ public sealed class BasketsMessageWorker(
             ?? throw new InvalidOperationException("Missing RabbitMQ messaging connection string.");
         var factory = new ConnectionFactory { Uri = new Uri(connectionString) };
         await using var connection = await factory.CreateConnectionAsync(ct);
-        await using var channel = await connection.CreateChannelAsync(cancellationToken: ct);
+        await using var placedChannel = await connection.CreateChannelAsync(cancellationToken: ct);
+        await using var completedChannel = await connection.CreateChannelAsync(cancellationToken: ct);
 
-        await channel.ExchangeDeclareAsync("orders", ExchangeType.Topic, durable: true, autoDelete: false, cancellationToken: ct);
-        await channel.ExchangeDeclareAsync("baskets.dead", ExchangeType.Topic, durable: true, autoDelete: false, cancellationToken: ct);
-        await channel.QueueDeclareAsync("baskets-service.dead", durable: true, exclusive: false, autoDelete: false, cancellationToken: ct);
-        await channel.QueueBindAsync("baskets-service.dead", "baskets.dead", "#", cancellationToken: ct);
+        await placedChannel.ExchangeDeclareAsync("orders", ExchangeType.Topic, durable: true, autoDelete: false, cancellationToken: ct);
+        await placedChannel.ExchangeDeclareAsync("baskets.dead", ExchangeType.Topic, durable: true, autoDelete: false, cancellationToken: ct);
+        await placedChannel.QueueDeclareAsync("baskets-service.dead", durable: true, exclusive: false, autoDelete: false, cancellationToken: ct);
+        await placedChannel.QueueBindAsync("baskets-service.dead", "baskets.dead", "#", cancellationToken: ct);
 
         var dlxArgs = new Dictionary<string, object?> { ["x-dead-letter-exchange"] = "baskets.dead" };
-        await channel.QueueDeclareAsync(OrderPlacedQueue, durable: true, exclusive: false, autoDelete: false, arguments: dlxArgs, cancellationToken: ct);
-        await channel.QueueBindAsync(OrderPlacedQueue, "orders", "order_placed", cancellationToken: ct);
-        await channel.QueueDeclareAsync(OrderCompletedQueue, durable: true, exclusive: false, autoDelete: false, arguments: dlxArgs, cancellationToken: ct);
-        await channel.QueueBindAsync(OrderCompletedQueue, "orders", "order_completed", cancellationToken: ct);
-        await channel.BasicQosAsync(0, 1, global: false, ct);
+        await placedChannel.QueueDeclareAsync(OrderPlacedQueue, durable: true, exclusive: false, autoDelete: false, arguments: dlxArgs, cancellationToken: ct);
+        await placedChannel.QueueBindAsync(OrderPlacedQueue, "orders", "order_placed", cancellationToken: ct);
+        await placedChannel.BasicQosAsync(0, 1, global: false, ct);
 
-        async Task ConsumeAsync(BasicDeliverEventArgs args)
+        await completedChannel.QueueDeclareAsync(OrderCompletedQueue, durable: true, exclusive: false, autoDelete: false, arguments: dlxArgs, cancellationToken: ct);
+        await completedChannel.QueueBindAsync(OrderCompletedQueue, "orders", "order_completed", cancellationToken: ct);
+        await completedChannel.BasicQosAsync(0, 1, global: false, ct);
+
+        async Task ConsumeAsync(IChannel consumerChannel, BasicDeliverEventArgs args)
         {
             var messageId = args.BasicProperties.MessageId;
             if (string.IsNullOrWhiteSpace(messageId))
@@ -86,22 +89,22 @@ public sealed class BasketsMessageWorker(
                     await db.SaveChangesAsync(ct);
                 }
 
-                await channel.BasicAckAsync(args.DeliveryTag, multiple: false, ct);
+                await consumerChannel.BasicAckAsync(args.DeliveryTag, multiple: false, ct);
             }
             catch (Exception ex)
             {
                 logger.LogError(ex, "Failed processing {RoutingKey} in Baskets.", args.RoutingKey);
-                await channel.BasicNackAsync(args.DeliveryTag, multiple: false, requeue: false, ct);
+                await consumerChannel.BasicNackAsync(args.DeliveryTag, multiple: false, requeue: false, ct);
             }
         }
 
-        var placedConsumer = new AsyncEventingBasicConsumer(channel);
-        placedConsumer.ReceivedAsync += (_, args) => ConsumeAsync(args);
-        await channel.BasicConsumeAsync(OrderPlacedQueue, autoAck: false, placedConsumer, ct);
+        var placedConsumer = new AsyncEventingBasicConsumer(placedChannel);
+        placedConsumer.ReceivedAsync += (_, args) => ConsumeAsync(placedChannel, args);
+        await placedChannel.BasicConsumeAsync(OrderPlacedQueue, autoAck: false, placedConsumer, ct);
 
-        var completedConsumer = new AsyncEventingBasicConsumer(channel);
-        completedConsumer.ReceivedAsync += (_, args) => ConsumeAsync(args);
-        await channel.BasicConsumeAsync(OrderCompletedQueue, autoAck: false, completedConsumer, ct);
+        var completedConsumer = new AsyncEventingBasicConsumer(completedChannel);
+        completedConsumer.ReceivedAsync += (_, args) => ConsumeAsync(completedChannel, args);
+        await completedChannel.BasicConsumeAsync(OrderCompletedQueue, autoAck: false, completedConsumer, ct);
 
         while (!ct.IsCancellationRequested)
         {

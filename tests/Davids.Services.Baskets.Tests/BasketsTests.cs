@@ -14,6 +14,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.IdentityModel.Tokens;
@@ -54,9 +55,6 @@ public sealed class BasketsFactory : WebApplicationFactory<Program>
         builder.UseSetting("CustomerOidc:Issuer", CustomerIssuer);
         builder.UseSetting("CustomerOidc:Audience", "davids-services");
         builder.UseSetting("CustomerOidc:PublicKeyPem", CustomerPublicKeyPem);
-        builder.UseSetting("AdminOidc:Issuer", AdminIssuer);
-        builder.UseSetting("AdminOidc:Audience", "davids-admin");
-        builder.UseSetting("AdminOidc:PublicKeyPem", AdminPublicKeyPem);
         builder.UseSetting("Vault:Enabled", "false");
         builder.UseSetting("Messaging:Enabled", "false");
         builder.UseSetting("Database:ApplyMigrations", "false");
@@ -166,5 +164,70 @@ public sealed class BasketsTests
         adminReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", BasketsFactory.CreateAdminToken(Guid.NewGuid()));
         var adminResp = await client.SendAsync(adminReq);
         Assert.Equal(HttpStatusCode.Unauthorized, adminResp.StatusCode);
+
+        // Adding a second distinct item, updating quantity, and removing an item persist cleanly across requests
+        var secondProductId = Guid.NewGuid();
+        factory.Catalog.Products[secondProductId] = new ProductCatalogSnapshot(secondProductId, "DEV-DOCK-02", "Workstation Dock", 200.00m, "GBP", 10, true);
+
+        using var addSecondReq = new HttpRequestMessage(HttpMethod.Put, "/baskets/me/items")
+        {
+            Content = JsonContent.Create(new UpsertBasketItem(secondProductId, 1))
+        };
+        addSecondReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", BasketsFactory.CreateCustomerToken(customerA));
+        var addSecondResp = await client.SendAsync(addSecondReq);
+        Assert.Equal(HttpStatusCode.OK, addSecondResp.StatusCode);
+        var multiBasket = await addSecondResp.Content.ReadFromJsonAsync<BasketDto>();
+        Assert.NotNull(multiBasket);
+        Assert.Equal(2, multiBasket!.Items.Count);
+        Assert.Equal(308.00m, multiBasket.TotalAmount);
+
+        using var updateFirstReq = new HttpRequestMessage(HttpMethod.Put, "/baskets/me/items")
+        {
+            Content = JsonContent.Create(new UpsertBasketItem(productId, 3))
+        };
+        updateFirstReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", BasketsFactory.CreateCustomerToken(customerA));
+        var updateFirstResp = await client.SendAsync(updateFirstReq);
+        Assert.Equal(HttpStatusCode.OK, updateFirstResp.StatusCode);
+        var updatedBasket = await updateFirstResp.Content.ReadFromJsonAsync<BasketDto>();
+        Assert.NotNull(updatedBasket);
+        Assert.Equal(362.00m, updatedBasket!.TotalAmount);
+
+        using var removeReq = new HttpRequestMessage(HttpMethod.Delete, $"/baskets/me/items/{secondProductId}");
+        removeReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", BasketsFactory.CreateCustomerToken(customerA));
+        var removeResp = await client.SendAsync(removeReq);
+        Assert.Equal(HttpStatusCode.OK, removeResp.StatusCode);
+        var afterRemove = await removeResp.Content.ReadFromJsonAsync<BasketDto>();
+        Assert.NotNull(afterRemove);
+        Assert.Single(afterRemove!.Items);
+        Assert.Equal(162.00m, afterRemove.TotalAmount);
+    }
+
+    [Fact]
+    public void AddBasketsInfrastructureSucceedsWithRealAppsettingsAndAppHostEnvironmentOnly()
+    {
+        var repoRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."));
+        var appSettingsPath = Path.Combine(repoRoot, "src", "Davids.Services.Baskets.Api", "appsettings.json");
+        Assert.True(File.Exists(appSettingsPath), $"Expected appsettings.json at {appSettingsPath}");
+
+        var config = new Microsoft.Extensions.Configuration.ConfigurationBuilder()
+            .AddJsonFile(appSettingsPath, optional: false)
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["ConnectionStrings:basketsdb"] = "Server=127.0.0.1,1433;Database=basketsdb;User Id=sa;Password=TestOnlyPassword123!;TrustServerCertificate=True",
+                ["ConnectionStrings:messaging"] = "amqp://guest:guest@127.0.0.1:5672",
+                ["CustomerOidc:Authority"] = "http://localhost:5004",
+                ["CustomerOidc:Issuer"] = "http://localhost:5004/",
+                ["ProductsApi:BaseUrl"] = "http://localhost:5006/",
+                ["Database:ApplyMigrations"] = "true",
+                ["Messaging:Enabled"] = "true"
+            })
+            .Build();
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        Davids.Services.Baskets.Infrastructure.BasketsInfrastructureExtensions.AddBasketsInfrastructure(services, config);
+
+        using var provider = services.BuildServiceProvider();
+        Assert.NotNull(provider.GetRequiredService<IBasketsService>());
     }
 }

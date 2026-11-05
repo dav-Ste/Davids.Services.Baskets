@@ -13,7 +13,6 @@ namespace Davids.Services.Baskets.Infrastructure;
 public static class BasketsInfrastructureExtensions
 {
     public const string CustomerScheme = "CustomerBearer";
-    public const string AdminScheme = "AdminBearer";
 
     public static IServiceCollection AddBasketsInfrastructure(this IServiceCollection services, IConfiguration configuration)
     {
@@ -22,11 +21,6 @@ public static class BasketsInfrastructureExtensions
         customerOidc.Audience ??= "davids-services";
         customerOidc.ValidateAndResolveStaticPublicKey("CustomerOidc");
         services.AddSingleton(customerOidc);
-
-        var adminOidc = configuration.GetSection("AdminOidc").Get<OidcAuthoritySettings>()
-            ?? new OidcAuthoritySettings { Audience = "davids-admin" };
-        adminOidc.Audience ??= "davids-admin";
-        adminOidc.ValidateAndResolveStaticPublicKey("AdminOidc");
 
         var connectionString = configuration.GetConnectionString("basketsdb")
             ?? throw new InvalidOperationException("Missing basketsdb connection.");

@@ -1,0 +1,27 @@
+<Solution>
+  <Folder Name="/Solution Items/">
+    <File Path="README.md" />
+    <File Path="LICENSE" />
+    <File Path=".gitignore" />
+    <File Path=".dockerignore" />
+    <File Path="Dockerfile" />
+    <File Path="Dockerfile.dockerignore" />
+    <File Path="Directory.Build.props" />
+    <File Path="Directory.Packages.props" />
+    <File Path="global.json" />
+    <File Path=".github/workflows/codeql.yml" />
+    <File Path=".github/workflows/pull-request-ci.yml" />
+  </Folder>
+  <Folder Name="/Baskets/">
+    <Project Path="src/Davids.Services.Baskets.Core/Davids.Services.Baskets.Core.csproj" />
+    <Project Path="src/Davids.Services.Baskets.Application/Davids.Services.Baskets.Application.csproj" />
+    <Project Path="src/Davids.Services.Baskets.Infrastructure/Davids.Services.Baskets.Infrastructure.csproj" />
+    <Project Path="src/Davids.Services.Baskets.Api/Davids.Services.Baskets.Api.csproj" />
+  </Folder>
+  <Folder Name="/Shared/">
+    <Project Path="../Davids.Shared/src/Davids.ServiceDefaults/Davids.ServiceDefaults.csproj" />
+  </Folder>
+  <Folder Name="/Tests/">
+    <Project Path="tests/Davids.Services.Baskets.Tests/Davids.Services.Baskets.Tests.csproj" />
+  </Folder>
+</Solution>

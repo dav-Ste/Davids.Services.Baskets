@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../Davids.Services.Baskets.Core/Davids.Services.Baskets.Core.csproj" />
+  </ItemGroup>
+</Project>

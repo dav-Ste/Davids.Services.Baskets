@@ -106,6 +106,12 @@ public sealed class BasketsService(
 
         var totalQty = lines.Sum(x => x.Quantity);
         var totalAmount = lines.Sum(x => x.LineTotal);
-        return new BasketDto(basket.CustomerId, lines, totalQty, totalAmount, basket.Currency, basket.UpdatedAt);
+        return new BasketDto(
+            basket.CustomerId,
+            lines,
+            totalQty,
+            totalAmount,
+            basket.Currency,
+            DateTime.SpecifyKind(basket.UpdatedAt, DateTimeKind.Utc));
     }
 }

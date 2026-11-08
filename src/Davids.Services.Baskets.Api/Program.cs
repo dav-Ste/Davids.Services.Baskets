@@ -3,6 +3,7 @@ using Davids.ServiceDefaults;
 using Davids.Services.Baskets.Api;
 using Davids.Services.Baskets.Api.Exceptions;
 using Davids.Services.Baskets.Application.Commands;
+using Davids.Services.Baskets.Application.DTO;
 using Davids.Services.Baskets.Application.Services;
 using Davids.Services.Baskets.Infrastructure;
 using Davids.Services.Baskets.Infrastructure.Auth;
@@ -125,8 +126,13 @@ app.MapGet("/", () => Results.Text("Davids Baskets Service"))
     .ExcludeFromDescription()
     .AllowAnonymous();
 
-app.MapGet("/baskets/me", async (ClaimsPrincipal user, IBasketsService service, CancellationToken ct) =>
+app.MapGet("/baskets/me", async (HttpContext ctx, ClaimsPrincipal user, IBasketsService service, CancellationToken ct) =>
     {
+        if (ctx.Request.QueryString.HasValue)
+        {
+            return Results.BadRequest(new { code = "unexpected_query_parameters", reason = "Basket endpoint does not accept query parameters." });
+        }
+
         if (!TryGetCustomerId(user, out var customerId))
         {
             return Results.Unauthorized();
@@ -134,10 +140,17 @@ app.MapGet("/baskets/me", async (ClaimsPrincipal user, IBasketsService service, 
 
         return Results.Ok(await service.GetBasketAsync(customerId, ct));
     })
+    .Produces<BasketDto>(StatusCodes.Status200OK)
+    .Produces(StatusCodes.Status400BadRequest)
     .RequireAuthorization("CustomerOnly");
 
 app.MapPut("/baskets/me/items", async (UpsertBasketItem command, ClaimsPrincipal user, IBasketsService service, CancellationToken ct) =>
     {
+        if (command is null)
+        {
+            return Results.BadRequest(new { code = "invalid_request", reason = "Request body is required." });
+        }
+
         if (!TryGetCustomerId(user, out var customerId))
         {
             return Results.Unauthorized();
@@ -145,10 +158,24 @@ app.MapPut("/baskets/me/items", async (UpsertBasketItem command, ClaimsPrincipal
 
         return Results.Ok(await service.UpsertItemAsync(customerId, command, ct));
     })
+    .Produces<BasketDto>(StatusCodes.Status200OK)
+    .Produces(StatusCodes.Status400BadRequest)
+    .Produces(StatusCodes.Status404NotFound)
+    .Produces(StatusCodes.Status409Conflict)
     .RequireAuthorization("CustomerOnly");
 
-app.MapDelete("/baskets/me/items/{productId:guid}", async (Guid productId, ClaimsPrincipal user, IBasketsService service, CancellationToken ct) =>
+app.MapDelete("/baskets/me/items/{productId}", async (HttpContext ctx, Guid productId, ClaimsPrincipal user, IBasketsService service, CancellationToken ct) =>
     {
+        if (ctx.Request.QueryString.HasValue)
+        {
+            return Results.BadRequest(new { code = "unexpected_query_parameters", reason = "Basket endpoint does not accept query parameters." });
+        }
+
+        if (productId == Guid.Empty)
+        {
+            return Results.BadRequest(new { code = "invalid_product_id", reason = "Product ID must be a non-empty UUID." });
+        }
+
         if (!TryGetCustomerId(user, out var customerId))
         {
             return Results.Unauthorized();
@@ -156,10 +183,17 @@ app.MapDelete("/baskets/me/items/{productId:guid}", async (Guid productId, Claim
 
         return Results.Ok(await service.RemoveItemAsync(customerId, productId, ct));
     })
+    .Produces<BasketDto>(StatusCodes.Status200OK)
+    .Produces(StatusCodes.Status400BadRequest)
     .RequireAuthorization("CustomerOnly");
 
-app.MapDelete("/baskets/me", async (ClaimsPrincipal user, IBasketsService service, CancellationToken ct) =>
+app.MapDelete("/baskets/me", async (HttpContext ctx, ClaimsPrincipal user, IBasketsService service, CancellationToken ct) =>
     {
+        if (ctx.Request.QueryString.HasValue)
+        {
+            return Results.BadRequest(new { code = "unexpected_query_parameters", reason = "Basket endpoint does not accept query parameters." });
+        }
+
         if (!TryGetCustomerId(user, out var customerId))
         {
             return Results.Unauthorized();
@@ -168,6 +202,8 @@ app.MapDelete("/baskets/me", async (ClaimsPrincipal user, IBasketsService servic
         await service.ClearBasketAsync(customerId, ct);
         return Results.NoContent();
     })
+    .Produces(StatusCodes.Status204NoContent)
+    .Produces(StatusCodes.Status400BadRequest)
     .RequireAuthorization("CustomerOnly");
 
 app.Run();
